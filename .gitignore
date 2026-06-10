@@ -36,6 +36,7 @@ outputs/
 logs/
 runs/
 wandb/
+*.splatv
 
 # Local agent/work logs
 .agents/

@@ -20,7 +20,12 @@ scripts/node_modules/
 tmp_build/
 web/baked/
 *.png
+*.jpg
+*.jpeg
+*.gif
 *.mp4
 *.webm
+*.splatv
+*.bin
 demo-out/
 e2e-out/
