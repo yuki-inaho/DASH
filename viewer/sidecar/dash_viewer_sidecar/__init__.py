@@ -10,6 +10,7 @@ wgpu-gs-viewer ``Gaussian3d`` 240-byte ABI. Split into focused modules:
   runtime           DASH hash-grid + DeformNetwork evaluation -> frame bytes
   server            threading TCP server speaking the protocol
   bake              export a frame sequence (raw payloads) for offline use
+  splatv            export 4DGS/STG-Lite PLY files to splaTV .splatv
   cli               argument parsing + serve/info/bake entry points
 """
 

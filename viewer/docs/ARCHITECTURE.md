@@ -18,6 +18,7 @@ integration MVP.)
 | `dash-runtime` | `crates/dash-runtime` | **Reusable transport.** Spawns the sidecar (CWD = `DASH_ROOT` so it reuses DASH's prebuilt hashencoder JIT), speaks the TCP protocol, validates stride/size, returns raw frame bytes. No viewer/GPU dependency. |
 | viewer (vendored fork) | `crates/wgpu-gs-viewer` | wgpu tile renderer + DASH glue: per-frame `queue.write_buffer` of streamed gaussians (`gaussian_buffer` gains `COPY_DST`), directory drag-and-drop / `--dash-model` auto-load, and a headless offscreen **`dash_bake`** binary. |
 | sidecar | `sidecar/dash_viewer_sidecar` | Loads the model once; per `t` evaluates `DeformModel.step` and packs deformed Gaussians into the 240-byte ABI. SOLID modules: `abi`, `protocol`, `model_repository`, `runtime`, `server`, `bake`, `cli`. |
+| splaTV exporter | `sidecar/dash_viewer_sidecar/splatv.py` | Converts 4DGS/STG-Lite Gaussian PLY files to the `antimatter15/splaTV` `.splatv` texture container, with tqdm progress. DASH/3DGS PLY input is supported only as an explicit static compatibility export. |
 | web player | `web/` | WebGPU-free 2D-canvas flipbook of baked PNG frames; the `playwright-cli` target. |
 
 ## Data flow
@@ -70,3 +71,12 @@ writes `frame_%04d.png` + `manifest.json`. It uses a robust auto-fit camera
 (per-axis median center + p95 radius — resilient to far COLMAP outliers) and an
 optional camera **orbit** so frames vary visibly even when a model is temporally
 near-static. Avoiding a swapchain makes rendering reliable on headless / VNC GPUs.
+
+## splaTV export
+
+`python -m dash_viewer_sidecar splatv` reads a Gaussian PLY and writes the splaTV
+4D texture layout: position/rotation/scale/color plus cubic `motion_0..8`,
+`omega_0..3`, and temporal `trbf_center/trbf_scale`. Use `--require-4d` for real
+4DGS/STG-Lite conversion. Without it, plain 3DGS/DASH PLY files are exported as
+static splats by writing zero motion and a wide temporal RBF; DASH's learned
+deformation remains available through the native sidecar path above.

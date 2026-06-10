@@ -10,6 +10,7 @@ from pathlib import Path
 from .bake import bake_frames
 from .runtime import DashModelRuntime
 from .server import serve as serve_runtime
+from .splatv import main as splatv_main
 
 
 def _add_common(parser: argparse.ArgumentParser) -> None:
@@ -64,10 +65,15 @@ def bake_main(argv=None) -> int:
 def main(argv=None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     if not argv:
-        print("usage: dash_viewer_sidecar {serve|info|bake} ...", file=sys.stderr)
+        print("usage: dash_viewer_sidecar {serve|info|bake|splatv} ...", file=sys.stderr)
         return 2
     cmd, rest = argv[0], argv[1:]
-    table = {"serve": serve_main, "info": info_main, "bake": bake_main}
+    table = {
+        "serve": serve_main,
+        "info": info_main,
+        "bake": bake_main,
+        "splatv": splatv_main,
+    }
     fn = table.get(cmd)
     if fn is None:
         print(f"unknown command: {cmd}", file=sys.stderr)

@@ -32,7 +32,7 @@ viewer/
     tests/                        pytest (ABI + real-model contract)
   web/                            2D-canvas flipbook player (playwright target)
   scripts/                        e2e_native.sh / e2e_web.sh / build_web.sh
-  docs/                           ARCHITECTURE / PROVENANCE / DOD
+  docs/                           ARCHITECTURE / PROVENANCE / DOD / SPLATV
 ```
 
 See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the design and the
@@ -80,6 +80,7 @@ the sibling `../.venv`. Override with the env vars below.
 pixi run build         # cargo build --release (workspace)
 pixi run run           # native viewer (auto-load + drag-and-drop)
 pixi run bake          # dash_bake: headless model -> PNG sequence
+pixi run splatv -- --input /path/to/point_cloud.ply --output web/baked/model.splatv --require-4d
 pixi run check         # fmt-check + clippy(-D) + tests for dash-runtime
 pixi run sidecar-test  # pytest (ABI + real-model contract) in the DASH .venv
 pixi run e2e-native    # headless bake + assert frames non-blank & differ
@@ -92,6 +93,10 @@ pixi run e2e-web       # playwright-cli: load + verify the browser playback
 - **Native vs web.** DASH playback (sidecar/CUDA) is native-only. The web player
   is a WebGPU-free 2D flipbook of GPU-rendered frames baked by `dash_bake`, so it
   runs in any (headless) browser — which is what `playwright-cli` drives.
+- **splaTV export.** `pixi run splatv -- ...` writes `.splatv` with a tqdm
+  progress bar. It is a true 4D export when the input PLY contains
+  `motion_*`/`omega_*`/`trbf_*`; DASH's own `point_cloud.ply` can also be
+  exported as a static compatibility preview. See [`docs/SPLATV.md`](docs/SPLATV.md).
 - **Reusability.** `crates/dash-runtime` has no viewer dependency: it owns the
   process lifecycle + TCP protocol and returns raw 240-byte frames. Any wgpu
   Gaussian viewer can reuse it by casting the bytes to its own `Gaussian3d`.

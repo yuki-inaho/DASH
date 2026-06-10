@@ -49,3 +49,12 @@ Differences vs. the original patch (intentional):
 The vendored `wgpu-gs-viewer` keeps its upstream warnings (a few unused
 imports / dead fields); run `pixi run clippy-viewer` to see them. This keeps the
 vendor diff minimal (DRY/KISS) rather than editing upstream cosmetically.
+
+## splaTV format reference
+
+The `.splatv` exporter in `sidecar/dash_viewer_sidecar/splatv.py` targets the
+format used by [`antimatter15/splaTV`](https://github.com/antimatter15/splaTV)
+(MIT, Kevin Kwok): 8-byte magic/manifest header, JSON chunk list, and an
+`RGBA32UI` payload with 16 `uint32` words per Gaussian. The implementation is a
+clean Python converter for DASH/viewer workflows rather than vendored upstream
+JavaScript.

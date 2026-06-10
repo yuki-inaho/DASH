@@ -37,6 +37,11 @@ check = { depends-on = ["fmt-check", "clippy", "test"] }
 # Sidecar contract tests run in the DASH uv .venv (needs torch+CUDA+DASH ext).
 sidecar-test = { cmd = "$DASH_PYTHON -m pytest sidecar/tests -q", env = { PYTHONPATH = "$PIXI_PROJECT_ROOT/sidecar:$DASH_ROOT" } }
 
+# Convert a Gaussian 4DGS/STG-Lite PLY to antimatter15/splaTV .splatv.
+# Example:
+#   pixi run splatv -- --input /path/to/point_cloud.ply --output web/baked/model.splatv --require-4d
+splatv = { cmd = "$DASH_PYTHON -m dash_viewer_sidecar splatv", env = { PYTHONPATH = "$PIXI_PROJECT_ROOT/sidecar:$DASH_ROOT" } }
+
 # Headless offscreen bake: render N frames of the DASH model to PNG (no window).
 bake = "cargo run --release -p wgpu-gs-viewer --bin dash_bake --"
 
