@@ -30,6 +30,7 @@
 | 種別 | ファイル/リンク | 概要・用途 |
 | --- | --- | --- |
 | 環境/引継ぎ | `docs/ONBOARDING.md` | 本ドキュメント。環境、制約、検証コマンド、次タスクを集約 |
+| データ lineage | `docs/DATA_COLMAP_WORKFLOW.md` | TVA_NYX650 元画像、400-frame subset、ALIKED + LightGlue + GLOMAP/COLMAP、DASH 接続、使用リポジトリのメモ |
 | 作業記録 | `temp/workdoc_Jun10-2026_dash_hydra_types_optimizer_refactor.md` | Hydra、型ヒント、optimizer、TensorBoard 追加の作業証跡 |
 | 作業記録 | `temp/workdoc_Jun10-2026_full_colmap_to_dash_training.md` | 400-frame COLMAP/GLOMAP 検証、DASH loader/CLI、short train 証跡 |
 | テスト資産 | `tests/` | 回帰テスト、Hydra/optimizer/TensorBoard/processed COLMAP validation |
@@ -152,6 +153,7 @@ DASH: 4D Hash Encoding with Self-Supervised Decomposition for Real-Time Dynamic 
 ├── pyproject.toml
 ├── uv.lock
 ├── docs/
+│   ├── DATA_COLMAP_WORKFLOW.md
 │   └── ONBOARDING.md
 ├── arguments/
 │   ├── default.py
@@ -574,6 +576,7 @@ env | grep -E "CUDA_HOME|LD_LIBRARY_PATH|PATH"
 
 * `2026-06-10 06:48:21 UTC` 初版作成。uv/CUDA 12.4 セットアップ、Issue 2/3 修正、N3DV config、テスト手順を整理。
 * `2026-06-10 11:35:00 UTC` 現状に合わせて更新。LLM オンボーディングサマリー、Hydra/Muon/Schedule-Free/TensorBoard、processed COLMAP loader/CLI、TVA 400-frame smoke、`26 passed` の検証状態を反映。
+* `2026-06-10 14:35:00 UTC` `docs/DATA_COLMAP_WORKFLOW.md` を追加し、元データから COLMAP/GLOMAP、DASH、viewer/splaTV までの lineage と使用リポジトリへの導線を追記。
 
 ---
 
