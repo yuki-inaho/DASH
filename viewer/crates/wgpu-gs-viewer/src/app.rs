@@ -83,6 +83,10 @@ pub struct AppState {
     is_focused: bool,
     is_occluded: bool,
 
+    mouse_left_down: bool,
+    mouse_pan_down: bool,
+    last_cursor: Option<(f64, f64)>,
+
     #[cfg(target_arch = "wasm32")]
     frames_in_flight: Arc<AtomicU32>,
     #[cfg(target_arch = "wasm32")]
@@ -92,6 +96,9 @@ pub struct AppState {
 impl AppState {
     pub async fn new(window: Arc<Window>) -> anyhow::Result<Self> {
         let size = window.inner_size();
+        window.set_title(
+            "DASH 4DGS viewer  |  L-drag: orbit · R-drag: pan · wheel: zoom · WASD/arrows · Q/E",
+        );
 
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
             #[cfg(not(target_arch = "wasm32"))]
@@ -326,6 +333,9 @@ impl AppState {
             last_update_time: Instant::now(),
             is_focused: true,
             is_occluded: false,
+            mouse_left_down: false,
+            mouse_pan_down: false,
+            last_cursor: None,
             #[cfg(target_arch = "wasm32")]
             frames_in_flight: Arc::new(AtomicU32::new(0)),
             #[cfg(target_arch = "wasm32")]
@@ -431,6 +441,19 @@ impl AppState {
             0,
             bytemuck::cast_slice(&[self.scene_uniform]),
         );
+    }
+
+    /// Recompute the camera from the controller and upload it (after mouse input).
+    fn apply_camera(&mut self) {
+        self.camera_controller.apply_to(&mut self.camera);
+        self.scene_uniform.update_camera(&self.camera);
+        self.queue.write_buffer(
+            &self.scene_uniform_buffer,
+            0,
+            bytemuck::cast_slice(&[self.scene_uniform]),
+        );
+        self.scene_dirty = true;
+        self.window.request_redraw();
     }
 
     pub fn render(&mut self) -> anyhow::Result<()> {
@@ -669,9 +692,47 @@ impl AppState {
             bytemuck::cast_slice(&[self.scene_uniform]),
         );
         self.scene_type = new_scene_type;
+
+        // Auto-fit the orbit camera to the freshly loaded gaussians so the model
+        // is well framed and orbits around its own centre (robust to far outliers).
+        if let Some((center, radius)) = gaussians_center_radius(&gaussians) {
+            let dist = (radius / (self.camera.fovy.to_radians() * 0.5).tan()) * 1.4;
+            self.camera.aspect = self.config.width as f32 / self.config.height as f32;
+            self.camera_controller.focus(center, dist);
+            self.camera_controller.apply_to(&mut self.camera);
+            self.scene_uniform.update_camera(&self.camera);
+            self.queue.write_buffer(
+                &self.scene_uniform_buffer,
+                0,
+                bytemuck::cast_slice(&[self.scene_uniform]),
+            );
+        }
+
         self.scene_dirty = true;
         Ok(())
     }
+}
+
+/// Median centre + p95 radius of the gaussian positions (robust to far outliers).
+fn gaussians_center_radius(g: &gaussian::Gaussians) -> Option<(Vec3, f32)> {
+    let pts: Vec<Vec3> = match g {
+        gaussian::Gaussians::Gaussian3d(v) => v.iter().map(|x| Vec3::from(x.position)).collect(),
+        gaussian::Gaussians::Gaussian4d(v) => v.iter().map(|x| Vec3::from(x.position)).collect(),
+    };
+    let n = pts.len();
+    if n == 0 {
+        return None;
+    }
+    let median = |sel: fn(&Vec3) -> f32| {
+        let mut c: Vec<f32> = pts.iter().map(sel).collect();
+        c.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        c[n / 2]
+    };
+    let center = Vec3::new(median(|p| p.x), median(|p| p.y), median(|p| p.z));
+    let mut d: Vec<f32> = pts.iter().map(|p| (*p - center).length()).collect();
+    d.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    let radius = d[((n as f32 * 0.95) as usize).min(n - 1)].max(1e-3);
+    Some((center, radius))
 }
 
 pub struct App {
@@ -879,6 +940,45 @@ impl ApplicationHandler<UserEvent> for App {
                     {
                         let _ = state.device.poll(wgpu::PollType::Poll);
                     }
+                }
+            }
+            WindowEvent::MouseInput {
+                state: btn_state,
+                button,
+                ..
+            } => {
+                let pressed = btn_state == ElementState::Pressed;
+                match button {
+                    MouseButton::Left => state.mouse_left_down = pressed,
+                    MouseButton::Right | MouseButton::Middle => state.mouse_pan_down = pressed,
+                    _ => {}
+                }
+                // Re-baseline on any press/release so the first drag delta is zero.
+                state.last_cursor = None;
+            }
+            WindowEvent::CursorMoved { position, .. } => {
+                let (x, y) = (position.x, position.y);
+                if let Some((lx, ly)) = state.last_cursor {
+                    let dx = (x - lx) as f32;
+                    let dy = (y - ly) as f32;
+                    if state.mouse_left_down {
+                        state.camera_controller.orbit_drag(dx, dy);
+                        state.apply_camera();
+                    } else if state.mouse_pan_down {
+                        state.camera_controller.pan_drag(dx, dy);
+                        state.apply_camera();
+                    }
+                }
+                state.last_cursor = Some((x, y));
+            }
+            WindowEvent::MouseWheel { delta, .. } => {
+                let amount = match delta {
+                    MouseScrollDelta::LineDelta(_, y) => y,
+                    MouseScrollDelta::PixelDelta(p) => (p.y as f32) / 50.0,
+                };
+                if amount != 0.0 {
+                    state.camera_controller.zoom_scroll(amount);
+                    state.apply_camera();
                 }
             }
             _ => {}

@@ -33,6 +33,7 @@ pub struct CameraController {
 
     rotation: Quat,
     radius: f32,
+    target: Vec3,
 
     is_yaw_left_pressed: bool,
     is_yaw_right_pressed: bool,
@@ -54,6 +55,7 @@ impl CameraController {
 
             rotation: Quat::IDENTITY,
             radius: 10.0,
+            target: Vec3::ZERO,
 
             is_yaw_left_pressed: false,
             is_yaw_right_pressed: false,
@@ -183,13 +185,48 @@ impl CameraController {
             return CameraState::Idle;
         }
 
-        camera.target = Vec3::ZERO;
-
-        let offset = self.rotation * Vec3::new(0.0, 0.0, self.radius);
-
-        camera.eye = camera.target + offset;
-        camera.up = (self.rotation * Vec3::Y).normalize();
-
+        self.apply_to(camera);
         CameraState::Active
+    }
+
+    /// Write the current orbit state (target / rotation / radius) into `camera`.
+    pub fn apply_to(&self, camera: &mut Camera) {
+        let offset = self.rotation * Vec3::new(0.0, 0.0, self.radius);
+        camera.target = self.target;
+        camera.eye = self.target + offset;
+        camera.up = (self.rotation * Vec3::Y).normalize();
+    }
+
+    /// Orbit by a mouse drag delta in pixels (left-drag).
+    pub fn orbit_drag(&mut self, dx: f32, dy: f32) {
+        const SENS: f32 = 0.005;
+        let up = (self.rotation * Vec3::Y).normalize();
+        let right = (self.rotation * Vec3::X).normalize();
+        let qy = Quat::from_axis_angle(up, -dx * SENS);
+        let qx = Quat::from_axis_angle(right, -dy * SENS);
+        self.rotation = (qx * qy * self.rotation).normalize();
+    }
+
+    /// Pan the focus point by a mouse drag delta in pixels (right/middle-drag).
+    /// Scaled by radius so panning feels consistent at any zoom level.
+    pub fn pan_drag(&mut self, dx: f32, dy: f32) {
+        let right = (self.rotation * Vec3::X).normalize();
+        let up = (self.rotation * Vec3::Y).normalize();
+        let scale = self.radius * 0.0015;
+        self.target += (-right * dx + up * dy) * scale;
+    }
+
+    /// Zoom by a scroll amount (positive = zoom in). Multiplicative.
+    pub fn zoom_scroll(&mut self, amount: f32) {
+        self.radius *= (0.88_f32).powf(amount);
+        self.radius = self.radius.clamp(0.01, 100_000.0);
+    }
+
+    /// Frame `center` at orbit `distance` with a pleasant 3/4 viewing angle.
+    pub fn focus(&mut self, center: Vec3, distance: f32) {
+        self.target = center;
+        self.radius = distance.max(0.01);
+        let dir = Vec3::new(1.0, 0.6, 1.0).normalize();
+        self.rotation = Quat::from_rotation_arc(Vec3::Z, dir).normalize();
     }
 }

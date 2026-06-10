@@ -29,6 +29,10 @@ to depend on the reusable `dash-runtime` crate instead of an in-tree module:
 - **New, beyond the patch:** `dash_bake.rs` + `bin/dash_bake.rs` (headless
   offscreen renderer with robust auto-fit camera + orbit) for verification and
   the web demo.
+- **Usability, beyond the patch:** mouse navigation in `app.rs`/`camera.rs`
+  (left-drag orbit, right/middle-drag pan, wheel zoom); the orbit camera now
+  tracks a movable `target` and **auto-fits** to the loaded model (median centre
+  + p95 radius, robust to far outliers); the window title shows the controls.
 
 Differences vs. the original patch (intentional):
 - DASH bridge is a standalone **`dash-runtime`** crate returning raw bytes (no
