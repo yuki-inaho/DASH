@@ -194,7 +194,11 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations):
 
             if iteration in testing_iterations:
                 cur_psnr_value = float(cur_psnr.item() if hasattr(cur_psnr, "item") else cur_psnr)
-                if cur_psnr_value >= best_psnr:
+                # B-1: only let the FINE stage (iteration > mask_iter) win "best".
+                # Coarse-stage test PSNR is computed with a purely static render
+                # (d_xyz=0), so without this guard a static checkpoint can become
+                # iteration_best -> render --iteration -2 then shows a static scene.
+                if cur_psnr_value >= best_psnr and iteration > opt.mask_iter:
                     best_psnr = cur_psnr_value
                     best_iteration = iteration
                     set_optimizer_mode(gaussians.optimizer, "eval")
