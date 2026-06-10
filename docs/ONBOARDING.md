@@ -1,14 +1,81 @@
-# 環境セットアップ・オンボーディングガイド
+# DASH オンボーディングガイド
 
 **作成日**: `2026-06-10`
 **対象**: `新しいセッション・エージェント、DASH の開発/検証を引き継ぐ開発メンバー`
 **プロジェクト**: `DASH (yuki-inaho/DASH fork, upstream: chenj02/DASH)`
-**目的**: `uv + CUDA 12.4 ベースの実行環境を再現し、Issue 2/3 修正後の検証と追加作業を安全に継続できるようにする`
+**目的**: `uv + CUDA 12.4 ベースの実行環境、COLMAP/GLOMAP 処理済みデータ読込、Hydra/MUON 設定、短時間学習検証を安全に引き継げるようにする`
+
+---
+
+## 0. LLMオンボーディングサマリー
+
+### プロジェクト概要と目的
+
+- **プロジェクト名称・領域:** DASH。動的シーン向け 4D Gaussian Splatting / dynamic scene rendering。
+- **最終成果物:** CUDA 12.4 + uv 環境で、COLMAP/GLOMAP 処理済みデータを DASH に読み込み、学習・レンダリング・検証できる再現可能な fork。
+- **価値:** 古い conda 前提や未検証の fallback を避け、実データの pose / sparse reconstruction から DASH 学習までを追跡可能にする。
+- **現時点の進捗サマリ:** Issue 2/3 修正、uv 移行、Hydra config、Muon + Schedule-Free optimizer、TensorBoard metadata、processed COLMAP dataset validation、TVA 400-frame short train まで完了。基準実装 commit `923101f` は `origin/main` に push 済み。
+
+### クリティカルな要求・制約
+
+- dummy/random/synthetic pose や random point cloud への fallback は禁止。実データ由来であることを DB/log/model analyzer/pycolmap で確認する。
+- `data/`, `output/`, SfM 結果、TensorBoard event、checkpoint は Git に入れない。
+- DASH 側は `uv`、gluemap/COLMAP 側は `pixi` を使う。環境を暗黙に混ぜない。
+- CUDA 拡張は CUDA Toolkit 12.4 / torch 2.5.1+cu124 を前提にする。
+- 既存の通常 COLMAP loader を壊さず、processed dataset のときだけ `mapping.csv` を検証して source frame 由来 `fid` を使う。
+- `ty` は legacy code 全体では既存診断が残る。今回追加ファイル単位での `ty` 成功と、全体 `pytest` 成功を品質ゲートにする。
+
+### 参照すべき合意済み資料
+
+| 種別 | ファイル/リンク | 概要・用途 |
+| --- | --- | --- |
+| 環境/引継ぎ | `docs/ONBOARDING.md` | 本ドキュメント。環境、制約、検証コマンド、次タスクを集約 |
+| 作業記録 | `temp/workdoc_Jun10-2026_dash_hydra_types_optimizer_refactor.md` | Hydra、型ヒント、optimizer、TensorBoard 追加の作業証跡 |
+| 作業記録 | `temp/workdoc_Jun10-2026_full_colmap_to_dash_training.md` | 400-frame COLMAP/GLOMAP 検証、DASH loader/CLI、short train 証跡 |
+| テスト資産 | `tests/` | 回帰テスト、Hydra/optimizer/TensorBoard/processed COLMAP validation |
+| データ検証 CLI | `scripts/validate_colmap_dataset.py` | processed COLMAP dataset の mapping/sparse/images 検証 |
+| 実装入口 | `train.py`, `render.py`, `scene/dataset_readers.py` | 学習、レンダリング、dataset 読込 |
+
+### タスク境界
+
+任せるタスク:
+
+- 回帰テスト付きの小さな修正、loader/CLI/config/test の追加。
+- 既存 workdoc に沿った検証、証跡収集、commit 前の git hygiene 確認。
+- 短時間 smoke train / render / TensorBoard 確認。
+
+任せないタスク:
+
+- データセットや学習出力の commit。
+- 長時間学習の結果を論文値として断定すること。
+- 未検証の pose 補完・dummy fallback・best checkpoint ロジック変更。
+- ユーザー指示なしの force push や履歴破壊。
+
+### インタラクション方針
+
+- **回答スタイル:** 日本語、結論先行、コマンドとパスを明示。
+- **回答手順:** 前提確認、実行内容、検証結果、残リスクの順で報告する。
+- **禁止事項・注意:** 未確定事項を断定しない。データ/出力を Git に混ぜない。環境 fallback を成功扱いしない。
+- **秘匿情報の扱い:** Git remote やローカルパスは必要最小限で扱い、認証情報や秘密鍵は表示しない。
+
+### 試行タスク
+
+1. `uv run pytest tests/test_colmap_processed.py -q` を実行し、processed COLMAP validation の基本を確認する。
+2. `uv run python scripts/validate_colmap_dataset.py ... --expect-images 400 --expect-registered 400` を実行し、実データがある場合だけ FULL 証跡を確認する。
+3. `output/tva_nyx650_400_smoke` がある場合、TensorBoard または `render.py` で smoke 結果を確認する。
+
+### 運用ルール・変更管理
+
+- ドキュメント更新時は、実コマンド結果・日付・対象 commit を更新履歴に残す。
+- TBD は放置せず、外部データ待ち・legacy debt・ユーザー判断待ちのどれかに分類する。
+- 大きな作業は workdoc を作り、worker 実施、auditor 承認、coordinator 受理の順で閉じる。
+- push 前に `git status --short --branch` と `git show --stat --oneline HEAD` を確認する。
 
 ---
 
 ## 目次
 
+0. [LLMオンボーディングサマリー](#0-llmオンボーディングサマリー)
 1. [プロジェクト概要](#1-プロジェクト概要)
 2. [現在のプロジェクト状態](#2-現在のプロジェクト状態)
 3. [前提条件の確認](#3-前提条件の確認)
@@ -30,18 +97,23 @@ DASH: 4D Hash Encoding with Self-Supervised Decomposition for Real-Time Dynamic 
 
 ### 最終目標
 
-動的シーン向け Gaussian Splatting の学習・レンダリングを、古い conda 環境に依存せず `uv` で再現可能にします。あわせて upstream issue 2/3 の分析で特定した不具合を回帰テスト付きで固定し、N3DV 向けの仮説 config を利用できる状態にします。
+動的シーン向け Gaussian Splatting の学習・レンダリングを、古い conda 環境に依存せず `uv` で再現可能にします。あわせて upstream issue 2/3 の分析で特定した不具合を回帰テスト付きで固定し、COLMAP/GLOMAP 処理済みデータを DASH 側で検証・読込・短時間学習できる状態にします。
 
 ### 主要コンポーネント
 
 * `train.py`: DASH の学習エントリポイント
 * `render.py`: レンダリングと FPS 計測
 * `scene/gaussian_model.py`: GaussianModel 本体、dynamic mask、densify/prune 処理
+* `scene/colmap_processed.py`: processed COLMAP/GLOMAP dataset の mapping/sparse/images 検証
+* `scripts/validate_colmap_dataset.py`: processed dataset 検証 CLI
 * `arguments/`: config 読み込みと dataset/config 別パラメータ
+* `configs/train/`: Hydra YAML config
+* `utils/optimizer_utils.py`: Adam / Schedule-Free / Muon optimizer helper
+* `utils/tensorboard_utils.py`: TensorBoard metadata helper
 * `submodules/depth-diff-gaussian-rasterization/`: CUDA rasterizer 拡張
 * `submodules/simple-knn/`: CUDA KNN 拡張
 * `hashencoder/`: JIT ビルドされる hash encoding CUDA 拡張
-* `tests/`: Issue 2/3 修正の回帰テスト
+* `tests/`: Issue 2/3、Hydra、optimizer、TensorBoard、processed COLMAP の回帰テスト
 
 ---
 
@@ -55,7 +127,10 @@ DASH: 4D Hash Encoding with Self-Supervised Decomposition for Real-Time Dynamic 
 | CUDA 拡張 | 完了 | rasterizer、simple-knn、hashencoder JIT の 3 種を CUDA Toolkit 12.4 でビルド・import 検証済み |
 | Issue 3 修正 | 完了 | `train.py` の dynamic render guard と `dynamic_image` None guard を修正 |
 | Issue 2 関連修正 | 完了 | `_dynamic` dtype bool 化、prune 常時実行化、FPS 計測 synchronize 追加、N3DV config 追加 |
-| テスト基盤 | 完了 | `pytest` ベースの回帰テストを追加し、`uv run pytest tests/ -q` で 10 passed を確認 |
+| Hydra / optimizer | 完了 | `configs/train/tva400_muon_schedulefree.yaml`、Muon + Schedule-Free optimizer、TensorBoard metadata を追加 |
+| processed COLMAP | 完了 | `mapping.csv` と sparse model を検証する loader helper / CLI / tests を追加 |
+| TVA 400-frame smoke | 完了 | ALIKED + LightGlue + GLOMAP/COLMAP 由来の 400-frame reconstruction を検証し、DASH short train 20 iteration を実行 |
+| テスト基盤 | 完了 | `pytest` ベースの回帰テストを追加し、`uv run pytest -q` で 26 passed を確認 |
 | オンボーディング | 完了 | 本ドキュメントに再現手順と既知の落とし穴を整理 |
 
 ### 依存パッケージのインストール状態
@@ -64,7 +139,7 @@ DASH: 4D Hash Encoding with Self-Supervised Decomposition for Real-Time Dynamic 
 
 ### 未実装・これから着手する項目
 
-* N3DV / Technicolor 実データセットを配置した長時間学習
+* N3DV / Technicolor / TVA などの実データセットを使った長時間学習
 * 論文値に対する PSNR/FPS の実測比較
 * `arguments/n3dv.py` の仮説値の実験的検証と調整
 * upstream への PR 作成や issue へのフィードバック
@@ -81,8 +156,16 @@ DASH: 4D Hash Encoding with Self-Supervised Decomposition for Real-Time Dynamic 
 ├── arguments/
 │   ├── default.py
 │   └── n3dv.py
+├── configs/train/
+│   └── tva400_muon_schedulefree.yaml
+├── scripts/
+│   └── validate_colmap_dataset.py
 ├── scene/
+│   ├── colmap_processed.py
 │   └── gaussian_model.py
+├── utils/
+│   ├── optimizer_utils.py
+│   └── tensorboard_utils.py
 ├── submodules/
 │   ├── depth-diff-gaussian-rasterization/
 │   └── simple-knn/
@@ -90,8 +173,14 @@ DASH: 4D Hash Encoding with Self-Supervised Decomposition for Real-Time Dynamic 
 ├── tests/
 │   ├── test_dynamic_dtype.py
 │   ├── test_n3dv_config.py
+│   ├── test_optimizer_utils.py
 │   ├── test_prune.py
-│   └── test_report_guard.py
+│   ├── test_report_guard.py
+│   ├── test_tensorboard_utils.py
+│   └── test_colmap_processed.py
+├── temp/
+│   ├── workdoc_Jun10-2026_dash_hydra_types_optimizer_refactor.md
+│   └── workdoc_Jun10-2026_full_colmap_to_dash_training.md
 ├── train.py
 └── render.py
 ```
@@ -173,10 +262,15 @@ uv sync --no-install-project
 * `numpy<2`: 既存コードとの互換性維持
 * `opencv-python`, `pillow`, `plyfile`, `pytorch-msssim`, `lpips`, `scipy`, `imageio`, `imageio-ffmpeg`, `tqdm`, `tensorboard`
 * `ninja`, `setuptools`: CUDA extension / JIT build に必要
+* `hydra-core`, `omegaconf`: Hydra YAML config merge
+* `jaxtyping`, `beartype`: 型ヒントと runtime type check
+* `schedulefree`, `muon-optimizer`: Schedule-Free / Muon optimizer
 
 主な dev dependencies:
 
 * `pytest`: 回帰テスト実行用
+* `ty`: 変更ファイル単位の型チェック
+* `rust`: ツール検証用 dependency
 
 確認:
 
@@ -269,12 +363,36 @@ uv run pytest tests/ -q
 期待値:
 
 ```text
-10 passed
+26 passed
 ```
 
-CUDA が使えない環境では GPU 依存テストが skip されます。本プロジェクトの完了確認では CUDA 環境で実際に pass させることを基準にしてください。
+CUDA が使えない環境では GPU 依存テストが skip される場合があります。本プロジェクトの完了確認では CUDA 環境で実際に pass させることを基準にしてください。
 
-### 5.4 train.py の最小スモーク
+### 5.4 processed COLMAP dataset の確認
+
+TVA 400-frame のローカルデータが存在する環境では、次で DASH 側の processed COLMAP loader を確認できます。`data/` は Git 管理外なので、clone 直後の環境には存在しない場合があります。
+
+```bash
+uv run python scripts/validate_colmap_dataset.py \
+  --source-path data/tva_nyx650_400_aliked_lg_glomap \
+  --mapping data/tva_nyx650_400_aliked_lg_glomap/mapping.csv \
+  --expect-images 400 \
+  --expect-registered 400 \
+  --validate-source-paths
+```
+
+期待値:
+
+```text
+images: 400
+mapping_rows: 400
+registered: 400
+points: 41333
+camera_models: PINHOLE
+source_paths_validated: True
+```
+
+### 5.5 train.py の最小スモーク
 
 データセットがない状態でも、config 読み込みと import chain の確認はできます。
 
@@ -286,6 +404,35 @@ timeout 60 uv run python train.py \
 ```
 
 `Find Config: arguments/n3dv.py` と merged config が出力された後、データセット不在により `AssertionError: Could not recognize scene type!` で止まるのは想定内です。
+
+### 5.6 TVA 400-frame short train
+
+processed dataset がある場合は、Hydra config と Muon + Schedule-Free optimizer を含む short train を実行できます。
+
+```bash
+export CUDA_HOME=/usr/local/cuda-12.4
+export PATH="$CUDA_HOME/bin:$PATH"
+export LD_LIBRARY_PATH="$CUDA_HOME/lib64:${LD_LIBRARY_PATH:-}"
+
+uv run python train.py \
+  -s data/tva_nyx650_400_aliked_lg_glomap \
+  -m output/tva_nyx650_400_smoke \
+  --images images \
+  --iterations 20 \
+  --test_iterations 10 20 \
+  --save_iterations 20 \
+  --conf arguments/n3dv.py \
+  --hydra_config configs/train/tva400_muon_schedulefree.yaml \
+  --quiet
+```
+
+確認対象:
+
+```text
+output/tva_nyx650_400_smoke/events.out.tfevents*
+output/tva_nyx650_400_smoke/point_cloud/iteration_20/point_cloud.ply
+output/tva_nyx650_400_smoke/deform/iteration_20/deform.pth
+```
 
 ---
 
@@ -347,6 +494,18 @@ ls /data
 uv run python train.py -s <dataset_path> --model_path <output_path> --conf arguments/n3dv.py
 ```
 
+### 問題7: processed COLMAP dataset の `source_path` が別環境で存在しない
+
+通常の DASH loader は `source_path` の存在を必須にしていません。処理済み dataset を別環境へ移した場合でも、`images/`, `sparse/0`, `mapping.csv` が揃っていれば読込可能です。元 source image まで含めて provenance を検証したい場合だけ CLI に `--validate-source-paths` を付けてください。
+
+### 問題8: `ty check scene/dataset_readers.py` が失敗する
+
+`scene/dataset_readers.py` には既存 legacy 型診断が残っています。今回の品質ゲートでは、追加ファイル単位で次が通ることを確認しています。
+
+```bash
+uv run ty check scene/colmap_processed.py scripts/validate_colmap_dataset.py tests/test_colmap_processed.py
+```
+
 ---
 
 ## 7. 次のステップ
@@ -364,24 +523,30 @@ git show -- train.py render.py scene/gaussian_model.py arguments/n3dv.py tests/
 * `scene/gaussian_model.py`: `_dynamic` bool 化と prune 常時実行
 * `render.py`: FPS 計測前後の `torch.cuda.synchronize()`
 * `arguments/n3dv.py`: N3DV 仮説 config
-* `tests/`: F1/F2/F3/F4 の回帰テスト
+* `configs/train/tva400_muon_schedulefree.yaml`: Muon + Schedule-Free training config
+* `scene/colmap_processed.py`: processed COLMAP 検証
+* `scripts/validate_colmap_dataset.py`: processed COLMAP 検証 CLI
+* `tests/`: F1/F2/F3/F4、Hydra、optimizer、TensorBoard、processed COLMAP の回帰テスト
 
 ### 7.2 実データセットでの検証
 
-N3DV または Technicolor を配置したら、次を優先します。
+N3DV、Technicolor、TVA などの実データセットを配置したら、次を優先します。
 
-1. `arguments/n3dv.py` で短時間学習を実行し、Gaussian 数と prune の挙動を確認する
-2. 学習後に `render.py` で FPS を測定する
-3. `metrics.py` で PSNR/SSIM/LPIPS を測定する
-4. N3DV 仮説値を必要に応じて調整する
+1. `scripts/validate_colmap_dataset.py` で pose / sparse / mapping の整合性を確認する
+2. `arguments/n3dv.py` と Hydra config で短時間学習を実行し、Gaussian 数と prune の挙動を確認する
+3. TensorBoard で loss/config/optimizer metadata を確認する
+4. 学習後に `render.py` で FPS と出力画像を確認する
+5. `metrics.py` で PSNR/SSIM/LPIPS を測定する
+6. N3DV 仮説値を必要に応じて調整する
 
 ### 7.3 便利なコマンド集
 
 ```bash
 git status --short
 uv pip list
-uv run pytest tests/ -q
+uv run pytest -q
 uv run python -m py_compile train.py render.py scene/gaussian_model.py arguments/n3dv.py
+uv run ty check scene/colmap_processed.py scripts/validate_colmap_dataset.py tests/test_colmap_processed.py
 env | grep -E "CUDA_HOME|LD_LIBRARY_PATH|PATH"
 ```
 
@@ -398,15 +563,17 @@ env | grep -E "CUDA_HOME|LD_LIBRARY_PATH|PATH"
 * [ ] `torch.cuda.is_available()` が `True` である
 * [ ] rasterizer と simple-knn の CUDA 拡張をインストールした
 * [ ] hashencoder JIT build が成功した
-* [ ] `uv run pytest tests/ -q` が CUDA 環境で `10 passed` になった
+* [ ] `uv run pytest -q` が CUDA 環境で `26 passed` になった
 * [ ] `arguments/n3dv.py` の仮説値が目的に合っていることを理解した
-* [ ] 実データセット検証は別作業であることを確認した
+* [ ] processed COLMAP dataset がある場合は CLI 検証を実行した
+* [ ] `data/` と `output/` は Git 管理外であることを確認した
 
 ---
 
 ## 9. 更新履歴
 
 * `2026-06-10 06:48:21 UTC` 初版作成。uv/CUDA 12.4 セットアップ、Issue 2/3 修正、N3DV config、テスト手順を整理。
+* `2026-06-10 11:35:00 UTC` 現状に合わせて更新。LLM オンボーディングサマリー、Hydra/Muon/Schedule-Free/TensorBoard、processed COLMAP loader/CLI、TVA 400-frame smoke、`26 passed` の検証状態を反映。
 
 ---
 
