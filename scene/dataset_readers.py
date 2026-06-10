@@ -15,6 +15,7 @@ from PIL import Image
 from typing import NamedTuple, Optional
 from scene.colmap_loader import read_extrinsics_text, read_intrinsics_text, qvec2rotmat, \
     read_extrinsics_binary, read_intrinsics_binary, read_points3D_binary, read_points3D_text
+from scene.colmap_processed import ColmapProcessedError, load_mapping_csv
 from utils.graphics_utils import getWorld2View2, focal2fov, fov2focal
 import numpy as np
 import json
@@ -131,7 +132,7 @@ def getNerfppNorm(cam_info):
     return {"translate": translate, "radius": radius}
 
 
-def readColmapCameras(cam_extrinsics, cam_intrinsics, images_folder):
+def readColmapCameras(cam_extrinsics, cam_intrinsics, images_folder, processed_mapping=None):
     cam_infos = []
     num_frames = len(cam_extrinsics)
     for idx, key in enumerate(cam_extrinsics):
@@ -166,7 +167,16 @@ def readColmapCameras(cam_extrinsics, cam_intrinsics, images_folder):
         image_name = os.path.basename(image_path).split(".")[0]
         image = Image.open(image_path)
 
-        fid = int(image_name) / (num_frames - 1)
+        if processed_mapping is not None:
+            image_filename = os.path.basename(image_path)
+            try:
+                fid = processed_mapping.fid_by_filename[image_filename]
+            except KeyError as exc:
+                raise ColmapProcessedError(
+                    f"mapping.csv has no fid entry for registered image: {image_filename}"
+                ) from exc
+        else:
+            fid = int(image_name) / (num_frames - 1)
         cam_info = CameraInfo(uid=uid, R=R, T=T, FovY=FovY, FovX=FovX, image=image,
                               image_path=image_path, image_name=image_name, width=width, height=height, fid=fid)
         cam_infos.append(cam_info)
@@ -215,8 +225,18 @@ def readColmapSceneInfo(path, images, eval, llffhold=8):
         cam_intrinsics = read_intrinsics_text(cameras_intrinsic_file)
 
     reading_dir = "images" if images == None else images
+    images_folder = os.path.join(path, reading_dir)
+    mapping_path = os.path.join(path, "mapping.csv")
+    processed_mapping = None
+    if os.path.exists(mapping_path):
+        processed_mapping = load_mapping_csv(
+            mapping_path,
+            images_dir=images_folder,
+            expect_images=len(cam_extrinsics),
+        )
     cam_infos_unsorted = readColmapCameras(cam_extrinsics=cam_extrinsics, cam_intrinsics=cam_intrinsics,
-                                           images_folder=os.path.join(path, reading_dir))
+                                           images_folder=images_folder,
+                                           processed_mapping=processed_mapping)
     cam_infos = sorted(cam_infos_unsorted.copy(), key=lambda x: x.image_name)
 
     if eval:
