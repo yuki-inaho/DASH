@@ -1,0 +1,48 @@
+[workspace]
+name = "dash-viewer"
+version = "0.1.0"
+description = "DASH 4DGS realtime viewer (Rust/wgpu) + Python/CUDA sidecar, pixi-managed."
+channels = ["conda-forge"]
+platforms = ["linux-64"]
+
+[dependencies]
+rust = ">=1.85"
+nodejs = ">=20"
+pkg-config = "*"
+
+# Default environment. The Rust viewer / dash-runtime read these to locate the
+# DASH repo and its uv .venv (reused as the sidecar's Python). PIXI_PROJECT_ROOT
+# is viewer/, so ".." is the DASH repo root.
+[activation.env]
+DASH_ROOT = "$PIXI_PROJECT_ROOT/.."
+DASH_PYTHON = "$PIXI_PROJECT_ROOT/../.venv/bin/python"
+DASH_SIDECAR_SCRIPT = "$PIXI_PROJECT_ROOT/sidecar/dash_sidecar.py"
+DASH_MODEL_DIR = "$PIXI_PROJECT_ROOT/../output/tva_nyx650_400_smoke"
+DASH_ITERATION = "-2"
+DASH_MASK_MODE = "ply_dynamic"
+
+[tasks]
+build = "cargo build --release"
+build-debug = "cargo build"
+run = "cargo run --release -p wgpu-gs-viewer --"
+fmt = "cargo fmt -p dash-runtime"
+fmt-check = "cargo fmt -p dash-runtime --check"
+# Strict on our own reusable crate; the vendored wgpu-gs-viewer keeps its
+# upstream warnings (see docs/PROVENANCE.md) so we don't widen the vendor diff.
+clippy = "cargo clippy -p dash-runtime --all-targets -- -D warnings"
+clippy-viewer = "cargo clippy -p wgpu-gs-viewer --all-targets"
+test = "cargo test -p dash-runtime"
+check = { depends-on = ["fmt-check", "clippy", "test"] }
+
+# Sidecar contract tests run in the DASH uv .venv (needs torch+CUDA+DASH ext).
+sidecar-test = { cmd = "$DASH_PYTHON -m pytest sidecar/tests -q", env = { PYTHONPATH = "$PIXI_PROJECT_ROOT/sidecar:$DASH_ROOT" } }
+
+# Headless offscreen bake: render N frames of the DASH model to PNG (no window).
+bake = "cargo run --release -p wgpu-gs-viewer --bin dash_bake --"
+
+# Native E2E (offscreen): bake frames and assert non-blank + motion.
+e2e-native = "bash scripts/e2e_native.sh"
+
+# Web build + playwright-cli verification.
+build-web = "bash scripts/build_web.sh"
+e2e-web = "bash scripts/e2e_web.sh"

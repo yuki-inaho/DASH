@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>DASH 4DGS viewer</title>
+    <link rel="icon" href="data:," />
+    <style>
+      html, body { margin: 0; background: #000; color: #3fff7f; font-family: monospace; }
+      #hud { position: fixed; top: 8px; left: 10px; text-shadow: 0 0 3px #000; font-size: 14px; }
+      #view { display: block; width: 100vw; height: auto; }
+    </style>
+  </head>
+  <body>
+    <div id="hud">loading…</div>
+    <canvas id="view" width="1280" height="720"></canvas>
+    <script src="player.js"></script>
+  </body>
+</html>

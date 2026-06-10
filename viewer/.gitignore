@@ -1,0 +1,26 @@
+# Rust
+/target/
+**/target/
+Cargo.lock.bak
+
+# pixi
+/.pixi/
+
+# Node / playwright
+node_modules/
+scripts/node_modules/
+.playwright-cli/
+.playwright/
+
+# Python caches
+**/__pycache__/
+*.pyc
+
+# Build / runtime artifacts (regenerated; never commit)
+tmp_build/
+web/baked/
+*.png
+*.mp4
+*.webm
+demo-out/
+e2e-out/

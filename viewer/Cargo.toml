@@ -1,0 +1,8 @@
+[workspace]
+resolver = "2"
+members = ["crates/dash-runtime", "crates/wgpu-gs-viewer"]
+default-members = ["crates/wgpu-gs-viewer"]
+
+# Profiles must live in the workspace root (moved here from the vendored crate).
+[profile.release]
+strip = true
