@@ -2,6 +2,9 @@
 name = "wgpu-gs-viewer"
 version = "0.1.0"
 edition = "2024"
+# Two binaries exist (the windowed viewer + the headless `dash_bake`); make the
+# windowed viewer the default so `cargo run` / `pixi run run` is unambiguous.
+default-run = "wgpu-gs-viewer"
 
 [dependencies]
 anyhow = "1.0"
