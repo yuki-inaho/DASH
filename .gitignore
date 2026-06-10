@@ -1,0 +1,48 @@
+# Python caches
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Python packaging and native build outputs
+build/
+dist/
+*.egg-info/
+*.egg
+*.so
+*.o
+*.a
+.ninja_*
+build.ninja
+
+# DASH CUDA/JIT build outputs
+tmp_build/
+submodules/**/build/
+submodules/**/*.egg-info/
+
+# Local run artifacts
+output/
+outputs/
+logs/
+runs/
+wandb/
+
+# Local agent/work logs
+.agents/
+temp/
+
+# Editors and OS files
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.swo

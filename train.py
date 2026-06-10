@@ -290,7 +290,7 @@ def training_report(tb_writer, iteration, Ll1, loss, l1_loss, testing_iterations
                     else:
                         static_image = None
 
-                    if static_indices.any():
+                    if dynamic_indices.any():
                         dynamic_d_xyz = d_xyz[dynamic_indices]
                         dynamic_d_rotation = d_rotation[dynamic_indices]
                         dynamic_d_scaling = d_scaling[dynamic_indices]
@@ -301,6 +301,8 @@ def training_report(tb_writer, iteration, Ll1, loss, l1_loss, testing_iterations
                                        dynamic_d_xyz, dynamic_d_rotation, dynamic_d_scaling, dynamic_d_opacity, dynamic_d_shs, mask=dynamic_indices)["render"],
                             0.0, 1.0
                         )
+                    else:
+                        dynamic_image = None
 
                     image = torch.clamp(
                         renderFunc(viewpoint, scene.gaussians, *renderArgs, d_xyz, d_rotation, d_scaling, d_opacity, d_shs)["render"],
@@ -317,8 +319,9 @@ def training_report(tb_writer, iteration, Ll1, loss, l1_loss, testing_iterations
                         if static_image is not None:
                             tb_writer.add_images(config['name'] + "_view_{}/static_render".format(viewpoint.image_name),
                                             static_image[None], global_step=iteration)
-                        tb_writer.add_images(config['name'] + "_view_{}/dynamic_render".format(viewpoint.image_name),
-                                            dynamic_image[None], global_step=iteration)
+                        if dynamic_image is not None:
+                            tb_writer.add_images(config['name'] + "_view_{}/dynamic_render".format(viewpoint.image_name),
+                                                dynamic_image[None], global_step=iteration)
                         tb_writer.add_images(config['name'] + "_view_{}/error_render".format(viewpoint.image_name),
                                             normalized_error_map[None], global_step=iteration)
                         if iteration == testing_iterations[0]:

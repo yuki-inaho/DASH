@@ -47,10 +47,12 @@ def render_set(model_path, load2gpu_on_the_fly, name, iteration, views, gaussian
         xyz = gaussians.get_xyz
         time_input = fid.unsqueeze(0).expand(xyz.shape[0], -1)
         gs_mask = gaussians.get_dynamic
+        torch.cuda.synchronize()
         t = time.time()
         deform_pkgs = deform.step(xyz.detach(), time_input, viewpoint_loc=None, vis_filter=None, extent=None, stage='fine', gs_mask=gs_mask, test=True)
         d_xyz, d_rotation, d_scaling, d_opacity, d_shs = deform_pkgs['d_xyz'], deform_pkgs['d_rotation'], deform_pkgs['d_scaling'], deform_pkgs['d_opacity'], deform_pkgs['d_shs']
         results = render(view, gaussians, pipeline, background, d_xyz, d_rotation, d_scaling, d_opacity, d_shs) 
+        torch.cuda.synchronize()
         total_time += time.time() - t
         mask = deform_pkgs['mask']
 

@@ -1,0 +1,44 @@
+[project]
+name = "dash-4dgs"
+version = "0.1.0"
+description = "DASH: 4D Hash Encoding with Self-Supervised Decomposition (uv migration)"
+requires-python = ">=3.10,<3.11"
+dependencies = [
+    "torch==2.5.1",
+    "torchvision==0.20.1",
+    "numpy<2",            # 2018-2023年代コードとの互換のため明示ピン(フェーズ1 F6設計)
+    "opencv-python>=4.9",
+    "pillow>=9.5",
+    "plyfile>=0.9",
+    "pytorch-msssim>=1.0",
+    "lpips>=0.1.4",
+    "scipy>=1.10",
+    "imageio>=2.31",
+    "imageio-ffmpeg>=0.4.9",
+    "tqdm>=4.66",
+    "tensorboard>=2.14",
+    "cachetools>=5.3",    # hashencoder/hashgrid.py が import
+    "ninja>=1.11",        # hashencoder JIT ビルドに必要
+    "setuptools>=69",     # uv の venv は素では setuptools を含まない。--no-build-isolation での
+                          # submodule ビルド(setup.py)と hashencoder JIT に必須(手順8/11 の前提)
+]
+
+[dependency-groups]
+dev = ["pytest>=8.0"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]    # tests/ から scene/ 等のリポジトリ直下モジュールを import するため
+testpaths = ["tests"]
+
+[tool.uv]
+# CUDA 拡張(submodules)は build isolation 不可のため依存に含めず、
+# 手順8で `uv pip install --no-build-isolation -e` により導入する。
+
+[[tool.uv.index]]
+name = "pytorch-cu124"
+url = "https://download.pytorch.org/whl/cu124"
+explicit = true
+
+[tool.uv.sources]
+torch = { index = "pytorch-cu124" }
+torchvision = { index = "pytorch-cu124" }

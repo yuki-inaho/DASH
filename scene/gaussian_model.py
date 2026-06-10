@@ -106,7 +106,7 @@ class GaussianModel:
 
         opacities = inverse_sigmoid(0.1 * torch.ones((fused_point_cloud.shape[0], 1), dtype=torch.float, device="cuda"))
 
-        dynamic = torch.zeros((fused_point_cloud.shape[0], 1), dtype=torch.long, device="cuda")
+        dynamic = torch.zeros((fused_point_cloud.shape[0], 1), dtype=torch.bool, device="cuda")
 
         self._xyz = nn.Parameter(fused_point_cloud.requires_grad_(True))
         self._features_dc = nn.Parameter(features[:, :, 0:1].transpose(1, 2).contiguous().requires_grad_(True))
@@ -186,7 +186,7 @@ class GaussianModel:
     def save_dynamic_ply(self, path):
         mkdir_p(os.path.dirname(path))
         dynamic = self._dynamic.detach().cpu().numpy()
-        mask = dynamic.squeeze(1)
+        mask = dynamic.squeeze(1).astype(bool)
         dynamic = dynamic[mask]
         xyz = self._xyz.detach().cpu().numpy()
         normals = np.zeros_like(xyz)
@@ -449,7 +449,7 @@ class GaussianModel:
             if not disable_ws_prune:
                 big_points_ws = self.get_scaling.max(dim=1).values > 0.1 * extent
                 prune_mask = torch.logical_or(prune_mask, big_points_ws)
-            self.prune_points(prune_mask)
+        self.prune_points(prune_mask)
 
         torch.cuda.empty_cache()
 
@@ -524,4 +524,4 @@ class GaussianModel:
         self.denom[update_filter] += 1
 
     def set_dynamic(self, new_dynamic): 
-        self._dynamic = new_dynamic.to("cuda")
+        self._dynamic = new_dynamic.bool().to("cuda")
