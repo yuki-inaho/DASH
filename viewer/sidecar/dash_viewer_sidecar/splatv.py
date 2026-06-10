@@ -97,9 +97,24 @@ def _sigmoid(x: np.ndarray) -> np.ndarray:
     return (1.0 / (1.0 + np.exp(-x))).astype(np.float32)
 
 
+# Largest finite value representable in IEEE float16.
+_F16_MAX = 65504.0
+
+
+def _sanitize_f16(arr: np.ndarray) -> np.ndarray:
+    """Replace NaN/inf and clamp to the float16 range before the f2 cast.
+
+    Degenerate outlier gaussians can have a huge ``exp(scale)`` that overflows
+    float16 to ``inf`` (and corrupts the packed texture). Clamping here keeps the
+    export valid without dropping gaussians.
+    """
+    arr = np.nan_to_num(arr, nan=0.0, posinf=_F16_MAX, neginf=-_F16_MAX)
+    return np.clip(arr, -_F16_MAX, _F16_MAX)
+
+
 def _pack_half2x16(x: np.ndarray | float, y: np.ndarray | float) -> np.ndarray:
-    x_arr = np.asarray(x, dtype=np.float32)
-    y_arr = np.broadcast_to(np.asarray(y, dtype=np.float32), x_arr.shape)
+    x_arr = _sanitize_f16(np.asarray(x, dtype=np.float32))
+    y_arr = _sanitize_f16(np.broadcast_to(np.asarray(y, dtype=np.float32), x_arr.shape))
     lo = x_arr.astype("<f2").view("<u2").astype("<u4")
     hi = y_arr.astype("<f2").view("<u2").astype("<u4")
     return (lo | (hi << np.uint32(16))).astype("<u4")
