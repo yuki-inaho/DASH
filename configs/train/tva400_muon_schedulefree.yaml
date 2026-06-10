@@ -1,0 +1,7 @@
+gaussian_optimizer_type: muon_schedulefree
+deform_optimizer_type: muon_schedulefree
+optimizer_weight_decay: 0.0
+muon_momentum: 0.95
+muon_ns_steps: 5
+schedulefree_momentum: 0.9
+schedulefree_weight_decay_at_y: 0.0

@@ -22,11 +22,21 @@ import uuid
 from tqdm import tqdm
 from utils.image_utils import psnr
 from argparse import ArgumentParser, Namespace
-from arguments import ModelParams, PipelineParams, OptimizationParams, merge_config
+from typing import Any, cast
+from arguments import (
+    ModelParams,
+    PipelineParams,
+    OptimizationParams,
+    apply_cli_overrides,
+    collect_explicit_cli_overrides,
+    merge_hydra_config,
+    merge_config,
+)
 import numpy as np
-from simple_knn._C import distCUDA2
 from random import sample
 import torchvision.transforms as transforms
+from utils.optimizer_utils import optimizer_display_name, set_optimizer_mode
+from utils.tensorboard_utils import write_training_metadata
 
 try:
     from torch.utils.tensorboard import SummaryWriter
@@ -52,6 +62,17 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations):
 
     scene = Scene(dataset, gaussians)
     gaussians.training_setup(opt)
+    assert gaussians.optimizer is not None
+    assert deform.optimizer is not None
+    metadata_args = Namespace(**vars(dataset), **vars(opt), **vars(pipe))
+    write_training_metadata(
+        tb_writer,
+        metadata_args,
+        {
+            "gaussian": optimizer_display_name(gaussians.optimizer),
+            "deform": optimizer_display_name(deform.optimizer),
+        },
+    )
 
     bg_color = [1, 1, 1] if dataset.white_background else [0, 0, 0]
     background = torch.tensor(bg_color, dtype=torch.float32, device="cuda")
@@ -82,17 +103,17 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations):
             selected_viewpoints = sample(viewpoint_stack, num_to_sample)
             viewpoint_stack = [v for v in viewpoint_stack if v not in selected_viewpoints]
 
-        d_xyz_norm = 0.0
-        Ls = 0.0
+        Ls = torch.zeros((), device="cuda")
         stage = 'fine'
         static_ratio = 0.0
-        loss = 0.0
-        Ll1 = 0.0
+        loss = torch.zeros((), device="cuda")
+        Ll1 = torch.zeros((), device="cuda")
         N = gaussians.get_xyz.shape[0]
+        d_xyz_norm = torch.zeros((N,), device="cuda")
         xyz = gaussians.get_xyz.detach()
 
         for viewpoint_cam in selected_viewpoints:
-            reg = 0.0
+            reg = torch.zeros((), device="cuda")
             if dataset.load2gpu_on_the_fly:
                 viewpoint_cam.load2device()
             if iteration < opt.warm_up:
@@ -172,17 +193,26 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations):
                                        dataset.load2gpu_on_the_fly, static_ratio, Lm, Ls, d_xyz_norm, torch.tensor(viewpoint_cam.T).unsqueeze(0), visibility_filter, scene.cameras_extent, stage)
 
             if iteration in testing_iterations:
-                if cur_psnr.item() >= best_psnr:
-                    best_psnr = cur_psnr.item()
+                cur_psnr_value = float(cur_psnr.item() if hasattr(cur_psnr, "item") else cur_psnr)
+                if cur_psnr_value >= best_psnr:
+                    best_psnr = cur_psnr_value
                     best_iteration = iteration
+                    set_optimizer_mode(gaussians.optimizer, "eval")
+                    set_optimizer_mode(deform.optimizer, "eval")
                     scene.save(iteration, True)
                     deform.save_weights(args.model_path, iteration, True)
+                    set_optimizer_mode(gaussians.optimizer, "train")
+                    set_optimizer_mode(deform.optimizer, "train")
                     print("Best: {} PSNR: {}".format(best_iteration, best_psnr))
 
             if iteration in saving_iterations or iteration == opt.dynamic_densify_until_iter :
                 print("\n[ITER {}] Saving Gaussians".format(iteration))
+                set_optimizer_mode(gaussians.optimizer, "eval")
+                set_optimizer_mode(deform.optimizer, "eval")
                 scene.save(iteration)
                 deform.save_weights(args.model_path, iteration)
+                set_optimizer_mode(gaussians.optimizer, "train")
+                set_optimizer_mode(deform.optimizer, "train")
 
             # Densification
             if iteration < opt.densify_until_iter:
@@ -206,6 +236,8 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations):
 
             # Optimizer step
             if iteration < opt.iterations:
+                set_optimizer_mode(gaussians.optimizer, "train")
+                set_optimizer_mode(deform.optimizer, "train")
                 gaussians.optimizer.step()
                 gaussians.update_learning_rate(iteration)
                 deform.optimizer.step()
@@ -218,10 +250,7 @@ def training(dataset, opt, pipe, testing_iterations, saving_iterations):
 
 def prepare_output_and_logger(args):
     if not args.model_path:
-        if os.getenv('OAR_JOB_ID'):
-            unique_str = os.getenv('OAR_JOB_ID')
-        else:
-            unique_str = str(uuid.uuid4())
+        unique_str = os.getenv('OAR_JOB_ID') or str(uuid.uuid4())
         args.model_path = os.path.join("./output/", unique_str[0:10])
 
     # Set up output folder
@@ -239,7 +268,7 @@ def prepare_output_and_logger(args):
     return tb_writer, args
 
 
-def training_report(tb_writer, iteration, Ll1, loss, l1_loss, testing_iterations, scene: Scene, renderFunc,
+def training_report(tb_writer, iteration, Ll1, loss, l1_loss, testing_iterations: list[int], scene: Scene, renderFunc,
                     renderArgs, deform, load2gpu_on_the_fly, percent_1, Lm, Ls, dxyz, viewpoint_loc, vis_filter, extent, stage):
     if tb_writer:
         tb_writer.add_scalar('train_loss_patches/l1_loss', Ll1.item(), iteration)
@@ -252,17 +281,23 @@ def training_report(tb_writer, iteration, Ll1, loss, l1_loss, testing_iterations
     test_psnr = 0.0
     # Report test and samples of training set
     if iteration in testing_iterations:
+        set_optimizer_mode(scene.gaussians.optimizer, "eval")
+        set_optimizer_mode(deform.optimizer, "eval")
         torch.cuda.empty_cache()
-        validation_configs = ({'name': 'test', 'cameras': scene.getTestCameras()},
-                              {'name': 'train',
-                               'cameras': [scene.getTrainCameras()[idx % len(scene.getTrainCameras())] for idx in
-                                           range(5, 30, 5)]})
+        validation_configs: tuple[dict[str, Any], ...] = (
+            {'name': 'test', 'cameras': scene.getTestCameras()},
+            {'name': 'train',
+             'cameras': [scene.getTrainCameras()[idx % len(scene.getTrainCameras())] for idx in
+                         range(5, 30, 5)]},
+        )
         
         for config in validation_configs:
-            if config['cameras'] and len(config['cameras']) > 0:
+            config_name = str(config['name'])
+            cameras = cast(list[Any], config['cameras'])
+            if cameras and len(cameras) > 0:
                 l1_test = []
                 psnr_test = []
-                for idx, viewpoint in enumerate(config['cameras']):
+                for idx, viewpoint in enumerate(cameras):
                     if load2gpu_on_the_fly:
                         viewpoint.load2device()
                     fid = viewpoint.fid
@@ -314,18 +349,18 @@ def training_report(tb_writer, iteration, Ll1, loss, l1_loss, testing_iterations
                     if load2gpu_on_the_fly:
                         viewpoint.load2device('cpu')
                     if tb_writer and (idx < 5):
-                        tb_writer.add_images(config['name'] + "_view_{}/render".format(viewpoint.image_name),
+                        tb_writer.add_images(config_name + "_view_{}/render".format(viewpoint.image_name),
                                              image[None], global_step=iteration)
                         if static_image is not None:
-                            tb_writer.add_images(config['name'] + "_view_{}/static_render".format(viewpoint.image_name),
+                            tb_writer.add_images(config_name + "_view_{}/static_render".format(viewpoint.image_name),
                                             static_image[None], global_step=iteration)
                         if dynamic_image is not None:
-                            tb_writer.add_images(config['name'] + "_view_{}/dynamic_render".format(viewpoint.image_name),
+                            tb_writer.add_images(config_name + "_view_{}/dynamic_render".format(viewpoint.image_name),
                                                 dynamic_image[None], global_step=iteration)
-                        tb_writer.add_images(config['name'] + "_view_{}/error_render".format(viewpoint.image_name),
+                        tb_writer.add_images(config_name + "_view_{}/error_render".format(viewpoint.image_name),
                                             normalized_error_map[None], global_step=iteration)
                         if iteration == testing_iterations[0]:
-                            tb_writer.add_images(config['name'] + "_view_{}/ground_truth".format(viewpoint.image_name),
+                            tb_writer.add_images(config_name + "_view_{}/ground_truth".format(viewpoint.image_name),
                                                  gt_image[None], global_step=iteration)
                           
                     l1_test.append(l1_loss(image, gt_image).mean().item())
@@ -333,17 +368,19 @@ def training_report(tb_writer, iteration, Ll1, loss, l1_loss, testing_iterations
 
                 l1_test = np.mean(l1_test)
                 psnr_test = np.mean(psnr_test)
-                if config['name'] == 'test' or len(validation_configs[0]['cameras']) == 0:
+                if config_name == 'test' or len(cast(list[Any], validation_configs[0]['cameras'])) == 0:
                     test_psnr = psnr_test
-                print("\n[ITER {}] Evaluating {}: L1 {} PSNR {}".format(iteration, config['name'], l1_test, psnr_test))
+                print("\n[ITER {}] Evaluating {}: L1 {} PSNR {}".format(iteration, config_name, l1_test, psnr_test))
                 if tb_writer:
-                    tb_writer.add_scalar(config['name'] + '/loss_viewpoint - l1_loss', l1_test, iteration)
-                    tb_writer.add_scalar(config['name'] + '/loss_viewpoint - psnr', psnr_test, iteration)
+                    tb_writer.add_scalar(config_name + '/loss_viewpoint - l1_loss', l1_test, iteration)
+                    tb_writer.add_scalar(config_name + '/loss_viewpoint - psnr', psnr_test, iteration)
 
         if tb_writer:
             tb_writer.add_histogram("scene/opacity_histogram", scene.gaussians.get_opacity, iteration)
             tb_writer.add_scalar('total_points', scene.gaussians.get_xyz.shape[0], iteration)
         torch.cuda.empty_cache()
+        set_optimizer_mode(scene.gaussians.optimizer, "train")
+        set_optimizer_mode(deform.optimizer, "train")
 
     return test_psnr
 
@@ -365,6 +402,8 @@ if __name__ == "__main__":
     pp = PipelineParams(parser)
     parser.add_argument('--ip', type=str, default="127.0.0.1")
     parser.add_argument('--conf', type=str, default=None)
+    parser.add_argument('--hydra_config', type=str, default=None)
+    parser.add_argument('--hydra_overrides', nargs="*", default=[])
     parser.add_argument('--port', type=int, default=6009)
     parser.add_argument('--detect_anomaly', action='store_true', default=False)
     parser.add_argument("--test_iterations", nargs="+", type=int,# default=[])
@@ -372,7 +411,7 @@ if __name__ == "__main__":
     parser.add_argument("--save_iterations", nargs="+", type=int, default=[3000, 5000, 10000, 20000, 30000, 40000])
     parser.add_argument("--quiet", action="store_true")
     args = parser.parse_args(sys.argv[1:])
-    args.save_iterations.append(args.iterations)
+    cli_overrides = collect_explicit_cli_overrides(parser, args, sys.argv[1:])
 
     print("Optimizing " + args.model_path)
 
@@ -381,6 +420,16 @@ if __name__ == "__main__":
         args = merge_config(args, args.conf)
     else:
         print("[WARNING] Using default config.")
+
+    if args.hydra_config is not None:
+        print("Find Hydra Config:", args.hydra_config)
+        args = merge_hydra_config(args, args.hydra_config, args.hydra_overrides)
+
+    args = apply_cli_overrides(args, cli_overrides)
+
+    args.save_iterations = list(args.save_iterations)
+    if args.iterations not in args.save_iterations:
+        args.save_iterations.append(args.iterations)
 
     # Initialize system state (RNG)
     safe_state(args.quiet)

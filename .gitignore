@@ -30,6 +30,7 @@ submodules/**/build/
 submodules/**/*.egg-info/
 
 # Local run artifacts
+data/
 output/
 outputs/
 logs/

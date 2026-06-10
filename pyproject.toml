@@ -20,11 +20,21 @@ dependencies = [
     "cachetools>=5.3",    # hashencoder/hashgrid.py が import
     "ninja>=1.11",        # hashencoder JIT ビルドに必要
     "setuptools>=69",     # uv の venv は素では setuptools を含まない。--no-build-isolation での
-                          # submodule ビルド(setup.py)と hashencoder JIT に必須(手順8/11 の前提)
+    # submodule ビルド(setup.py)と hashencoder JIT に必須(手順8/11 の前提)
+    "hydra-core>=1.3.2",
+    "omegaconf>=2.3.0",
+    "jaxtyping>=0.3.7",
+    "beartype>=0.22.9",
+    "schedulefree>=1.4.1",
+    "muon-optimizer",
 ]
 
 [dependency-groups]
-dev = ["pytest>=8.0"]
+dev = [
+    "pytest>=8.0",
+    "rust>=1.3.1",
+    "ty>=0.0.46",
+]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]    # tests/ から scene/ 等のリポジトリ直下モジュールを import するため
@@ -42,3 +52,4 @@ explicit = true
 [tool.uv.sources]
 torch = { index = "pytorch-cu124" }
 torchvision = { index = "pytorch-cu124" }
+muon-optimizer = { git = "https://github.com/KellerJordan/Muon" }

@@ -5,6 +5,7 @@ from scene.network import DeformNetwork, Dash4d
 import os
 from utils.system_utils import searchForMaxIteration
 from utils.general_utils import get_expon_lr_func, get_expon_lr_func_1
+from utils.optimizer_utils import build_optimizer
 
 
 class DeformModel:
@@ -35,14 +36,14 @@ class DeformModel:
         self.reg_temporal_able = reg_temporal_able
         self.temporal_perturb_range = None
         if self.reg_temporal_able:
-            if type(temporal_perturb_range) is float:
+            if isinstance(temporal_perturb_range, float):
                 temporal_perturb_range = [temporal_perturb_range for _ in range(4)]
             else:
                 assert len(temporal_perturb_range) == 4
             self.temporal_perturb_range = torch.tensor(temporal_perturb_range, device="cuda", dtype=torch.float32)
 
 
-        if type(scale_xyz) is float:
+        if isinstance(scale_xyz, float):
                 scale_xyz = [scale_xyz for _ in range(3)]
         else:
             assert len(scale_xyz) == 3
@@ -97,7 +98,7 @@ class DeformModel:
              "name": "grid"}
         ]
 
-        self.optimizer = torch.optim.Adam(l, lr=0.0, eps=1e-15)
+        self.optimizer = build_optimizer(l, training_args.deform_optimizer_type, training_args)
 
         self.network_lr_scheduler = get_expon_lr_func(lr_init=training_args.position_lr_init * self.network_lr_scale,
                                                        lr_final=training_args.position_lr_final,
@@ -135,6 +136,7 @@ class DeformModel:
         self.dash.load_state_dict(grid_weight)
 
     def update_learning_rate(self, iteration):
+        assert self.optimizer is not None
         for param_group in self.optimizer.param_groups:
             if param_group["name"] == "deform":
                 lr = self.network_lr_scheduler(iteration)

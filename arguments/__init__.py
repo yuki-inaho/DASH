@@ -13,6 +13,14 @@ from argparse import ArgumentParser, Namespace
 import sys
 import os
 import importlib.util
+from collections.abc import Mapping, Sequence
+from pathlib import Path
+from typing import Any, cast
+
+from beartype import beartype
+from hydra import compose, initialize_config_dir
+from hydra.core.global_hydra import GlobalHydra
+from omegaconf import OmegaConf
 
 class GroupParams:
     pass
@@ -171,6 +179,13 @@ class OptimizationParams(ParamGroup):
         self.dynamic_densification_interval = 100
         self.dynamic_densify_grad_threshold = 0.0002
         self.data_sample = 'stack'
+        self.gaussian_optimizer_type = "adam"
+        self.deform_optimizer_type = "adam"
+        self.optimizer_weight_decay = 0.0
+        self.muon_momentum = 0.95
+        self.muon_ns_steps = 5
+        self.schedulefree_momentum = 0.9
+        self.schedulefree_weight_decay_at_y = 0.0
         super().__init__(parser, "Optimization Parameters")
 
 
@@ -199,9 +214,78 @@ def get_combined_args(parser: ArgumentParser):
 
 def merge_config(args, config):
     spec = importlib.util.spec_from_file_location("*", config)
-    config = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(config)
-    for key in dir(config):
+    if spec is None or spec.loader is None:
+        raise ImportError(f"Could not load config module: {config}")
+    loader = spec.loader
+    config_module = importlib.util.module_from_spec(spec)
+    loader.exec_module(config_module)
+    for key in dir(config_module):
         if not key.startswith("__") and hasattr(args, key):
-            setattr(args, key, getattr(config, key))
+            setattr(args, key, getattr(config_module, key))
+    return args
+
+
+@beartype
+def merge_config_mapping(args: Namespace, config: Mapping[str, Any]) -> Namespace:
+    for key, value in config.items():
+        if hasattr(args, key):
+            setattr(args, key, value)
+    return args
+
+
+@beartype
+def merge_hydra_config(
+    args: Namespace,
+    config_path: str | os.PathLike[str] | None,
+    overrides: Sequence[str] | None = None,
+) -> Namespace:
+    if config_path is None:
+        return args
+
+    hydra_path = Path(config_path).expanduser().resolve()
+    if not hydra_path.exists():
+        raise FileNotFoundError(f"Hydra config not found: {hydra_path}")
+    if hydra_path.suffix not in {".yaml", ".yml"}:
+        raise ValueError(f"Hydra config must be a YAML file: {hydra_path}")
+
+    GlobalHydra.instance().clear()
+    with initialize_config_dir(config_dir=str(hydra_path.parent), version_base=None):
+        cfg = compose(config_name=hydra_path.stem)
+    OmegaConf.set_struct(cfg, False)
+    if overrides:
+        cfg = OmegaConf.merge(cfg, OmegaConf.from_dotlist(list(overrides)))
+    config = OmegaConf.to_container(cfg, resolve=True)
+    if not isinstance(config, dict):
+        raise TypeError(f"Hydra config must resolve to a mapping: {hydra_path}")
+    if not all(isinstance(key, str) for key in config):
+        raise TypeError(f"Hydra config keys must be strings: {hydra_path}")
+    return merge_config_mapping(args, cast(Mapping[str, Any], config))
+
+
+@beartype
+def collect_explicit_cli_overrides(parser: ArgumentParser, args: Namespace, argv: Sequence[str]):
+    option_to_dest = {}
+    for action in parser._actions:
+        for option_string in action.option_strings:
+            option_to_dest[option_string] = action.dest
+
+    explicit_dests = set()
+    for token in argv:
+        if token == "--":
+            break
+        option = token.split("=", 1)[0]
+        if option in option_to_dest:
+            explicit_dests.add(option_to_dest[option])
+
+    return {
+        dest: getattr(args, dest)
+        for dest in explicit_dests
+        if dest != "help" and hasattr(args, dest)
+    }
+
+
+@beartype
+def apply_cli_overrides(args: Namespace, overrides: Mapping[str, Any]) -> Namespace:
+    for key, value in overrides.items():
+        setattr(args, key, value)
     return args
